@@ -248,9 +248,8 @@ def positive_worker_count(requested: int, item_count: int) -> int:
     return max(1, min(max(1, requested), max(1, item_count)))
 
 
-# ==================== 提取自 cfnb 仓库的 TCP 延迟测试接口 ====================
+# ==================== TCP 延迟测试接口 ====================
 def tcping_sync(node: Node, timeout: float) -> float | None:
-    """使用 socket.getaddrinfo 与底层 socket 建立连接计算 TCP 延迟"""
     start = time.perf_counter()
     try:
         addr_info = socket.getaddrinfo(node.ip, node.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -268,7 +267,7 @@ def tcping_sync(node: Node, timeout: float) -> float | None:
 
 async def tcping(node: Node, timeout: float) -> float | None:
     return await asyncio.to_thread(tcping_sync, node, timeout)
-# =====================================================================
+# ==========================================================
 
 
 async def run_tcp_tests(nodes: Sequence[Node], *, timeout: float, workers: int, verbose: bool) -> list[TcpResult]:
@@ -326,7 +325,7 @@ def get_curl_command() -> str | None:
     return shutil.which("curl")
 
 
-# ==================== 提取自 cfnb 仓库的 curl 下载测速接口 ====================
+# ==================== curl 下载测速接口 ====================
 def measure_speed_with_curl(node: Node, timeout: float, process_buffer: float) -> float:
     curl = get_curl_command()
     if curl is None:
@@ -363,7 +362,7 @@ def measure_speed_with_curl(node: Node, timeout: float, process_buffer: float) -
         return parse_curl_speed(result.stdout)
     except (OSError, subprocess.TimeoutExpired):
         return 0.0
-# =====================================================================
+# ==========================================================
 
 
 def parse_curl_speed(stdout: str) -> float:
