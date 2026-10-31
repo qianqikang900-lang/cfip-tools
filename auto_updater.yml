@@ -1,0 +1,36 @@
+name: Cloudflare IP Auto Updater
+
+on:
+  # 定时触发：每天北京时间上午 8 点运行一次 (UTC 0:00)
+  schedule:
+    - cron: '0 0 * * *'
+  # 支持手动触发
+  workflow_dispatch:
+
+jobs:
+  update-ips:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 运行优选 IP 脚本 (Linux 版本)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 进入 linux_py 目录（根据仓库中的 linux_py 模块进行调整）
+          cd linux_py
+          # 如果有依赖需要安装，可在此执行 pip install -r requirements.txt
+          python main.py
+
+      - name: 自动提交并推送结果到仓库
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add best_ips.txt full_ips.txt README.md
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: 自动更新 Cloudflare 优选 IP 节点 [skip ci]" && git push)
