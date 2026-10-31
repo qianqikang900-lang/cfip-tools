@@ -8,9 +8,16 @@ on:
 jobs:
   update-ips:
     runs-on: ubuntu-latest
+    
+    # 确保任务级别或步骤级别拥有写入权限
+    permissions:
+      contents: write
+
     steps:
       - name: 检出仓库代码
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
@@ -30,19 +37,11 @@ jobs:
           python update.py
 
       - name: 自动提交并推送结果到仓库
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # 将子目录生成的文件移动到根目录（如果它们在 linux_py 里的的话）
-          # 如果您的脚本原本就生成在根目录，可忽略此移动命令
-          # cp linux_py/best_ips.txt ./ 2>/dev/null || true
-          # cp linux_py/full_ips.txt ./ 2>/dev/null || true
-
-          # 更稳妥的做法：直接把 linux_py 目录下的结果文件 add 进去
-          git add linux_py/best_ips.txt linux_py/full_ips.txt README.md || true
-          
-          # 或者如果已经在根目录生成，直接 add：
-          # git add best_ips.txt full_ips.txt README.md || true
-
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: 自动更新 Cloudflare 优选 IP 节点 [skip ci]" && git push)
+          git add linux_py/best_ips.txt linux_py/full_ips.txt || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: 自动更新 Cloudflare 优选 IP 节点 [skip ci]" && git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main)
