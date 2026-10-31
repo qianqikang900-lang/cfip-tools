@@ -26,7 +26,7 @@ jobs:
           # 进入 linux_py 目录（根据仓库中的 linux_py 模块进行调整）
           cd linux_py
           # 如果有依赖需要安装，可在此执行 pip install -r requirements.txt
-          python main.py
+          python update.py
 
       - name: 自动提交并推送结果到仓库
         run: |
