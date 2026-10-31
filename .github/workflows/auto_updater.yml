@@ -19,13 +19,19 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: 安装依赖项
+        run: |
+          python -m pip install --upgrade pip
+          # 如果您的项目里有 requirements.txt，可以直接用下面这行：
+          if [ -f linux_py/requirements.txt ]; then pip install -r linux_py/requirements.txt; fi
+          # 或者直接手动安装脚本需要的常见依赖（如 tqdm、requests 等）：
+          pip install tqdm requests
+
       - name: 运行优选 IP 脚本 (Linux 版本)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 进入 linux_py 目录（根据仓库中的 linux_py 模块进行调整）
           cd linux_py
-          # 如果有依赖需要安装，可在此执行 pip install -r requirements.txt
           python update.py
 
       - name: 自动提交并推送结果到仓库
