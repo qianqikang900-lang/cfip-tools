@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import socket
 import urllib.error
 import urllib.request
 from collections import defaultdict
@@ -18,7 +19,6 @@ from tqdm import tqdm
 
 DEFAULT_INPUT_FILE = Path("ips.txt")
 DEFAULT_INPUT_URL = "https://zip.cm.edu.kg/all.txt"
-#DEFAULT_INPUT_URL = "https://countrymerge.pages.dev/all.txt"
 DEFAULT_INPUT_DOWNLOAD_TIMEOUT = 30.0
 DEFAULT_BEST_OUTPUT_FILE = Path("best_ips.txt")
 DEFAULT_FULL_OUTPUT_FILE = Path("full_ips.txt")
@@ -32,6 +32,7 @@ DEFAULT_SPEED_WORKERS = 5
 DEFAULT_MIN_SPEED_MBPS = 16
 DEFAULT_TOP_PER_REGION = 10
 
+# 接入 cfnb 仓库官方标准的测速域名和测速参数
 SPEED_DOMAIN = "speed.cloudflare.com"
 SPEED_PATH = "/__down"
 SPEED_BYTES = 2 * 1024 * 1024
@@ -75,8 +76,8 @@ class AppConfig:
     top_per_region: int
     verbose: bool
     numbered_regions: bool
-    show_latency: bool   # whether to include latency in output labels
-    show_mbps: bool      # whether to include download speed in output labels
+    show_latency: bool
+    show_mbps: bool
 
 
 @dataclass(frozen=True)
@@ -129,14 +130,13 @@ def parse_args() -> AppConfig:
         default=os.environ.get("NO", "false"),
         help="number output region labels, for example #HK_1",
     )
-    # ── label display options ──────────────────────────────────────────────────
     parser.add_argument(
         "--show-latency",
         nargs="?",
         const="true",
         default=os.environ.get("SHOW_LATENCY", "true"),
         metavar="BOOL",
-        help="include latency (ms) in output labels (default: true; env: SHOW_LATENCY)",
+        help="include latency (ms) in output labels",
     )
     parser.add_argument(
         "--show-mbps",
@@ -144,9 +144,8 @@ def parse_args() -> AppConfig:
         const="true",
         default=os.environ.get("SHOW_MBPS", "false"),
         metavar="BOOL",
-        help="include download speed (Mbps) in output labels (default: false; env: SHOW_MBPS)",
+        help="include download speed (Mbps) in output labels",
     )
-    # ──────────────────────────────────────────────────────────────────────────
     args = parser.parse_args()
 
     try:
@@ -249,21 +248,27 @@ def positive_worker_count(requested: int, item_count: int) -> int:
     return max(1, min(max(1, requested), max(1, item_count)))
 
 
-async def tcping(node: Node, timeout: float) -> float | None:
+# ==================== 提取自 cfnb 仓库的 TCP 延迟测试接口 ====================
+def tcping_sync(node: Node, timeout: float) -> float | None:
+    """使用 socket.getaddrinfo 与底层 socket 建立连接计算 TCP 延迟"""
     start = time.perf_counter()
-    writer: asyncio.StreamWriter | None = None
     try:
-        _, writer = await asyncio.wait_for(asyncio.open_connection(node.ip, node.port), timeout=timeout)
-        return round((time.perf_counter() - start) * 1000, 2)
-    except (OSError, TimeoutError, asyncio.TimeoutError):
-        return None
-    finally:
-        if writer is not None:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except (OSError, TimeoutError, asyncio.TimeoutError):
-                pass
+        addr_info = socket.getaddrinfo(node.ip, node.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for res in addr_info:
+            af, socktype, proto, _, sa = res
+            with socket.socket(af, socktype, proto) as s:
+                s.settimeout(timeout)
+                s.connect(sa)
+                latency = round((time.perf_counter() - start) * 1000, 2)
+                return latency
+    except (socket.error, OSError, TimeoutError):
+        pass
+    return None
+
+
+async def tcping(node: Node, timeout: float) -> float | None:
+    return await asyncio.to_thread(tcping_sync, node, timeout)
+# =====================================================================
 
 
 async def run_tcp_tests(nodes: Sequence[Node], *, timeout: float, workers: int, verbose: bool) -> list[TcpResult]:
@@ -321,6 +326,7 @@ def get_curl_command() -> str | None:
     return shutil.which("curl")
 
 
+# ==================== 提取自 cfnb 仓库的 curl 下载测速接口 ====================
 def measure_speed_with_curl(node: Node, timeout: float, process_buffer: float) -> float:
     curl = get_curl_command()
     if curl is None:
@@ -357,6 +363,7 @@ def measure_speed_with_curl(node: Node, timeout: float, process_buffer: float) -
         return parse_curl_speed(result.stdout)
     except (OSError, subprocess.TimeoutExpired):
         return 0.0
+# =====================================================================
 
 
 def parse_curl_speed(stdout: str) -> float:
@@ -421,15 +428,6 @@ async def run_speed_tests(
 
 
 def build_label(result: SpeedResult, *, show_latency: bool, show_mbps: bool) -> str:
-    """Build the bracket annotation appended to each output line.
-
-    Examples (with various flag combinations):
-      show_latency=True,  show_mbps=False  →  [高速 by Jz 12ms]
-      show_latency=False, show_mbps=True   →  [高速 by Jz 123.45Mbps]
-      show_latency=True,  show_mbps=True   →  [高速 by Jz 12ms | 123.45Mbps]
-      show_latency=False, show_mbps=False  →  [高速 by Jz]          (fast only)
-                                           →  []                      (not fast, no info)
-    """
     parts: list[str] = []
     fast_prefix = FAST_LABEL if result.is_fast else ""
 
@@ -503,10 +501,6 @@ async def supplement_my_results(
         print("MY supplement skipped: no TCP reachable MY nodes")
         return results
 
-    print(
-        f"MY nodes in best output: {my_count}; "
-        f"retesting all {len(my_candidates)} TCP reachable MY node(s)"
-    )
     tested_my_results = await run_speed_tests(
         my_candidates,
         timeout=config.speed_timeout,
@@ -527,7 +521,6 @@ async def supplement_my_results(
     if selected:
         results.extend(selected)
         results.sort(key=lambda item: (item.node.region, item.latency_ms, -item.speed_mbps))
-    print(f"MY supplement added: {len(selected)}")
     return results
 
 
@@ -549,7 +542,7 @@ async def run(config: AppConfig) -> int:
         return 1
 
     print(f"Loaded {len(nodes)} unique nodes from {config.input_file}")
-    print(f"Stage 1/2: TCP latency test, concurrency={config.tcp_workers}")
+    print(f"Stage 1/2: TCP latency test (cfnb style), concurrency={config.tcp_workers}")
     tcp_results = await run_tcp_tests(
         nodes,
         timeout=config.tcp_timeout,
@@ -562,7 +555,7 @@ async def run(config: AppConfig) -> int:
 
     if candidates:
         print(
-            "Stage 2/2: download speed test, "
+            "Stage 2/2: download speed test (cfnb curl style), "
             f"concurrency={config.speed_workers}, fast tag > {config.min_speed_mbps} Mbps"
         )
         speed_results = await run_speed_tests(
