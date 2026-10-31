@@ -142,7 +142,7 @@ def parse_args() -> AppConfig:
         "--show-mbps",
         nargs="?",
         const="true",
-        default=os.environ.get("SHOW_MBPS", "false"),
+        default=os.environ.get("SHOW_MBPS", "true"),
         metavar="BOOL",
         help="include download speed (Mbps) in output labels",
     )
